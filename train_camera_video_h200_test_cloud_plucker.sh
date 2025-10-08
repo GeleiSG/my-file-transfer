@@ -24,6 +24,12 @@ IMAGE_ENCODER_PATH="/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/model
 TEXT_ENCODER_PATH="/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_t5_umt5-xxl-enc-bf16.pth"
 VAE_PATH="/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/Wan2.1_VAE.pth"
 
+# ===== 新增路径 =====
+# 请将此路径指向您为 ID Encoder 创建的配置文件
+# 这个配置文件包含了模型权重路径和结构参数
+ID_ENCODER_CONFIG_PATH="diffsynth/configs/IDEncoder_config.json"
+# ===================
+
 # -- 训练超参数 --
 PER_DEVICE_BATCH_SIZE=8
 ACCUMULATE_GRAD_BATCHES=1
@@ -98,6 +104,7 @@ CUDA_VISIBLE_DEVICES=${GPUS} python -m wanvideo.train_wan_camera_t2v_plucker_for
     --image_encoder_path "${IMAGE_ENCODER_PATH}" \
     --text_encoder_path "${TEXT_ENCODER_PATH}" \
     --vae_path "${VAE_PATH}" \
+    --id_encoder_path "${ID_ENCODER_CONFIG_PATH}" \
     --steps_per_epoch 0 \
     --per_device_batch_size ${PER_DEVICE_BATCH_SIZE} \
     --dataloader_num_workers ${DATALOADER_NUM_WORKERS} \

@@ -14,6 +14,7 @@ from torchvision.transforms import ToTensor
 from einops import rearrange
 
 from diffsynth.data.camera_utils import get_camera_sparse_embedding, get_plucker_embedding, get_relative_pose, ray_condition
+from PIL import Image
 
 class CameraVideoDataset(torch.utils.data.Dataset):
     def __init__(self, base_path, npz_path, extend_paths, steps_per_epoch, max_num_frames=100, frame_interval=1, num_frames=81, height=480, width=832, is_i2v=False, is_camera=False):

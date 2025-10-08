@@ -26,7 +26,9 @@ from ..models.wan_video_dit import RMSNorm, sinusoidal_embedding_1d
 from ..models.wan_video_vae import RMS_norm, CausalConv3d, Upsample
 from ..models.wan_video_motion_controller import WanMotionControllerModel
 
-
+# ===== 新增代码开始 =====
+from torchvision import transforms
+# ===== 新增代码结束 =====
 
 class WanVideoCameraPipeline(BasePipeline):
 
@@ -42,6 +44,17 @@ class WanVideoCameraPipeline(BasePipeline):
         # self.camera_encoder: WanCameraEncoder = None
         self.motion_controller: WanMotionControllerModel = None
         self.vace: VaceWanModel = None
+
+        # ===== 新增代码开始 =====
+        self.id_encoder = None
+        self.model_names = ['text_encoder', 'dit', 'vae', 'image_encoder', 'motion_controller', 'vace', 'id_encoder']
+        self.id_transform = transforms.Compose([
+            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
+        # ===== 新增代码结束 =====
+
         self.model_names = ['text_encoder', 'dit', 'vae', 'image_encoder', 'motion_controller', 'vace']
         self.height_division_factor = 16
         self.width_division_factor = 16
@@ -200,6 +213,10 @@ class WanVideoCameraPipeline(BasePipeline):
         self.motion_controller = model_manager.fetch_model("wan_video_motion_controller")
         self.vace = model_manager.fetch_model("wan_video_vace")
         # self.camera_encoder = model_manager.fetch_model("wan_video_camera_encoder")
+
+        # ===== 新增代码开始 =====
+        self.id_encoder = model_manager.fetch_model("id_encoder")
+        # ===== 新增代码结束 =====
 
 
     @staticmethod
@@ -591,6 +608,7 @@ class WanVideoCameraPipeline(BasePipeline):
         render_mask=None,
         input_image=None,
         end_image=None,
+        id_image=None, # ===== 新增参数 =====
         input_video=None,
         control_video=None,
         vace_video=None,
@@ -652,6 +670,17 @@ class WanVideoCameraPipeline(BasePipeline):
             image_emb = self.encode_image(input_image, end_image, num_frames, height, width, **tiler_kwargs)
         else:
             image_emb = {}
+
+        # ===== 新增代码开始 =====
+        id_embedding = None
+        if id_image is not None and self.id_encoder is not None:
+            self.load_models_to_device(["id_encoder"])
+            print("Encoding ID image...")
+            id_image_tensor = self.id_transform(id_image).unsqueeze(0).to(self.device, dtype=self.torch_dtype)
+            id_embedding = self.id_encoder(id_image_tensor)
+        # ===== 新增代码结束 =====
+
+
         # Encode camera context
         cam_emb=None
         if camera_pose is not None:
@@ -701,19 +730,48 @@ class WanVideoCameraPipeline(BasePipeline):
             #     print(progress_id)
             #     prompt_emb_posi = prompt_emb_post_camera
                 # cam_emb = None
-            noise_pred_posi = model_fn_wan_video(
-                self.dit, motion_controller=self.motion_controller, vace=self.vace,
-                x=latents, timestep=timestep, cam_emb=cam_emb, render_latent=render_latent, render_mask=render_mask,
+
+            # 准备模型输入
+            model_kwargs_posi = {
+                "x": latents, "timestep": timestep, "cam_emb": cam_emb, 
+                "render_latent": render_latent, "render_mask": render_mask,
                 **prompt_emb_posi, **image_emb, **extra_input,
                 **tea_cache_posi, **usp_kwargs, **motion_kwargs, **vace_kwargs,
+                "id_embedding": id_embedding  # 传递ID embedding
+            }
+
+            # noise_pred_posi = model_fn_wan_video(
+            #     self.dit, motion_controller=self.motion_controller, vace=self.vace,
+            #     x=latents, timestep=timestep, cam_emb=cam_emb, render_latent=render_latent, render_mask=render_mask,
+            #     **prompt_emb_posi, **image_emb, **extra_input,
+            #     **tea_cache_posi, **usp_kwargs, **motion_kwargs, **vace_kwargs,
+            # )
+            noise_pred_posi = model_fn_wan_video(
+                self.dit, motion_controller=self.motion_controller, vace=self.vace,
+                **model_kwargs_posi
             )
+
             cfg_scale = 1.0
             if cfg_scale != 1.0:
-                noise_pred_nega = model_fn_wan_video(
-                    self.dit, motion_controller=self.motion_controller, vace=self.vace,
-                    x=latents, timestep=timestep, cam_emb=None, render_latent=None, render_mask=None,
+                # 为负向提示也准备ID embedding（通常是0或一个专门训练的null embedding）
+                uncond_id_embedding = torch.zeros_like(id_embedding) if id_embedding is not None else None
+                model_kwargs_nega = {
+                    "x": latents, "timestep": timestep, "cam_emb": None, 
+                    "render_latent": None, "render_mask": None,
                     **prompt_emb_nega, **image_emb, **extra_input,
                     **tea_cache_nega, **usp_kwargs, **motion_kwargs, **vace_kwargs,
+                    "id_embedding": uncond_id_embedding
+                }
+                # noise_pred_nega = model_fn_wan_video(
+                #     self.dit, motion_controller=self.motion_controller, vace=self.vace,
+                #     x=latents, timestep=timestep, cam_emb=None, render_latent=None, render_mask=None,
+                #     **prompt_emb_nega, **image_emb, **extra_input,
+                #     **tea_cache_nega, **usp_kwargs, **motion_kwargs, **vace_kwargs,
+                # )
+                # noise_pred = noise_pred_nega + cfg_scale * (noise_pred_posi - noise_pred_nega)
+                noise_pred_nega = model_fn_wan_video(
+                    self.dit, motion_controller=self.motion_controller, vace=self.vace,
+                    **model_kwargs_nega
                 )
                 noise_pred = noise_pred_nega + cfg_scale * (noise_pred_posi - noise_pred_nega)
             else:
@@ -799,6 +857,7 @@ def model_fn_wan_video(
     render_mask: torch.Tensor = None,
     clip_feature: Optional[torch.Tensor] = None,
     y: Optional[torch.Tensor] = None,
+    id_embedding: Optional[torch.Tensor] = None, # ===== 新增参数 =====
     vace_context = None,
     vace_scale = 1.0,
     tea_cache: TeaCache = None,
@@ -896,16 +955,24 @@ def model_fn_wan_video(
         x = tea_cache.update(x)
     else:
         for block_id, block in enumerate(dit.blocks):
-            if block_id <100:
-                x = block(x, context, t_mod, freqs)
-                # adding control features
-                if block_id < len(controlnet_states):
-                    x += controlnet_states[block_id]
-            else:
-                x = block(x, context, t_mod, freqs)
-                # adding control features
-                if block_id < len(controlnet_states):
-                    x += controlnet_states[block_id]
+            # if block_id <100:
+            #     x = block(x, context, t_mod, freqs)
+            #     # adding control features
+            #     if block_id < len(controlnet_states):
+            #         x += controlnet_states[block_id]
+            # else:
+            #     x = block(x, context, t_mod, freqs)
+            #     # adding control features
+            #     if block_id < len(controlnet_states):
+            #         x += controlnet_states[block_id]
+            # if vace_context is not None and block_id in vace.vace_layers_mapping:
+            #     x = x + vace_hints[vace.vace_layers_mapping[block_id]] * vace_scale
+            x = block(x, context, t_mod, freqs, id_embedding=id_embedding)
+            
+            # adding control features
+            if block_id < len(controlnet_states):
+                x += controlnet_states[block_id]
+            
             if vace_context is not None and block_id in vace.vace_layers_mapping:
                 x = x + vace_hints[vace.vace_layers_mapping[block_id]] * vace_scale
         if tea_cache is not None:

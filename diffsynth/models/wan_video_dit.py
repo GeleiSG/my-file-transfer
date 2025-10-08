@@ -193,6 +193,28 @@ class CrossAttention(nn.Module):
             x = x + y
         return self.o(x)
 
+class IDCrossAttention(nn.Module):
+    def __init__(self, dim: int, num_heads: int, eps: float = 1e-6):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+
+        self.q = nn.Linear(dim, dim)
+        self.k = nn.Linear(dim, dim)
+        self.v = nn.Linear(dim, dim)
+        self.o = nn.Linear(dim, dim)
+        self.norm_q = RMSNorm(dim, eps=eps)
+        self.norm_k = RMSNorm(dim, eps=eps)
+        self.attn = AttentionModule(self.num_heads)
+
+    def forward(self, x: torch.Tensor, id_embedding: torch.Tensor):
+        q = self.norm_q(self.q(x))
+        k = self.norm_k(self.k(id_embedding))
+        v = self.v(id_embedding)
+        x = self.attn(q, k, v)
+        return self.o(x)
+
 
 class GateModule(nn.Module):
     def __init__(self,):
@@ -211,6 +233,13 @@ class DiTBlock(nn.Module):
         self.self_attn = SelfAttention(dim, num_heads, eps)
         self.cross_attn = CrossAttention(
             dim, num_heads, eps, has_image_input=has_image_input)
+
+        # ===== 新增代码开始 =====
+        # 为ID注入添加一个新的CrossAttention和LayerNorm
+        self.id_cross_attn = IDCrossAttention(dim, num_heads, eps)
+        self.norm_id = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        # ===== 新增代码结束 =====
+
         self.norm1 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
         self.norm2 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
         self.norm3 = nn.LayerNorm(dim, eps=eps)
@@ -224,7 +253,7 @@ class DiTBlock(nn.Module):
         mean = x.mean(dim=-1, keepdim=True)
         std = x.std(dim=-1, keepdim=True)
         return (x - mean) / (std + eps) * (1 + gamma) + beta
-    def forward(self, x, context, t_mod, freqs, cam_emb=None):
+    def forward(self, x, context, t_mod, freqs, cam_emb=None, id_embedding=None):
         # msa: multi-head self-attention  mlp: multi-layer perceptron
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
@@ -255,6 +284,13 @@ class DiTBlock(nn.Module):
         # print(x.shape)
 
         x = x + self.cross_attn(self.norm3(x), context)
+
+        # ===== 新增代码开始 =====
+        # 注入ID信息
+        if id_embedding is not None:
+            x = x + self.id_cross_attn(self.norm_id(x), id_embedding)
+        # ===== 新增代码结束 =====
+
         input_x = modulate(self.norm2(x), shift_mlp, scale_mlp)
         x = self.gate(x, gate_mlp, self.ffn(input_x))
         return x
@@ -433,6 +469,7 @@ class WanModel(torch.nn.Module):
                 render_latent: Optional[torch.Tensor] = None,
                 render_mask: Optional[torch.Tensor] = None,
                 camera_embedding: Optional[torch.Tensor] = None,
+                id_embedding: Optional[torch.Tensor] = None, # ===== 新增参数 =====
                 enable_render_drop: bool = True,
                 enable_camera_drop: bool = True,
                 use_gradient_checkpointing: bool = False,
@@ -544,46 +581,74 @@ class WanModel(torch.nn.Module):
         
         
         for i_block, block in enumerate(self.blocks):
-            if i_block < self.camera_layer:
-                if self.training or self.gradient_checkpointing and use_gradient_checkpointing:
-                    if use_gradient_checkpointing_offload:
-                        with torch.autograd.graph.save_on_cpu():
-                            x = torch.utils.checkpoint.checkpoint(
-                                create_custom_forward(block),
-                                x, context, t_mod, freqs,
-                                use_reentrant=False,
-                            )
-                    else:
+            # 将 id_embedding 作为参数传递给 block
+            block_kwargs = {
+                "x": x, "context": context, "t_mod": t_mod, "freqs": freqs, "id_embedding": id_embedding
+            }
+            # if i_block < self.camera_layer:
+            #     if self.training or self.gradient_checkpointing and use_gradient_checkpointing:
+            #         if use_gradient_checkpointing_offload:
+            #             with torch.autograd.graph.save_on_cpu():
+            #                 x = torch.utils.checkpoint.checkpoint(
+            #                     create_custom_forward(block),
+            #                     x, context, t_mod, freqs,
+            #                     use_reentrant=False,
+            #                 )
+            #         else:
+            #             x = torch.utils.checkpoint.checkpoint(
+            #                 create_custom_forward(block),
+            #                 x, context, t_mod, freqs,
+            #                 use_reentrant=False,
+            #             )
+            #         # adding control features
+            #         if i_block < len(controlnet_states):
+            #             x += controlnet_states[i_block]
+            #     else:
+            #         x = block(x, context, t_mod, freqs)
+            #         # adding control features
+            #         if i_block < len(controlnet_states):
+            #             x += controlnet_states[i_block]
+            # else:
+            #     if self.training or self.gradient_checkpointing and use_gradient_checkpointing:
+            #         if use_gradient_checkpointing_offload:
+            #             with torch.autograd.graph.save_on_cpu():
+            #                 x = torch.utils.checkpoint.checkpoint(
+            #                     create_custom_forward(block),
+            #                     x, context, t_mod, freqs,
+            #                     use_reentrant=False,
+            #                 )
+            #         else:
+            #             x = torch.utils.checkpoint.checkpoint(
+            #                 create_custom_forward(block),
+            #                 x, context, t_mod, freqs,
+            #                 use_reentrant=False,
+            #             )
+            #     else:
+            #         x = block(x, context, t_mod, freqs)
+            if i_block >= self.camera_layer:
+                block_kwargs["cam_emb"] = None # or some other logic
+            
+            if self.training or self.gradient_checkpointing and use_gradient_checkpointing:
+                if use_gradient_checkpointing_offload:
+                    with torch.autograd.graph.save_on_cpu():
                         x = torch.utils.checkpoint.checkpoint(
                             create_custom_forward(block),
-                            x, context, t_mod, freqs,
+                            **block_kwargs,
                             use_reentrant=False,
                         )
-                    # adding control features
-                    if i_block < len(controlnet_states):
-                        x += controlnet_states[i_block]
                 else:
-                    x = block(x, context, t_mod, freqs)
-                    # adding control features
-                    if i_block < len(controlnet_states):
-                        x += controlnet_states[i_block]
+                    x = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        **block_kwargs,
+                        use_reentrant=False,
+                    )
             else:
-                if self.training or self.gradient_checkpointing and use_gradient_checkpointing:
-                    if use_gradient_checkpointing_offload:
-                        with torch.autograd.graph.save_on_cpu():
-                            x = torch.utils.checkpoint.checkpoint(
-                                create_custom_forward(block),
-                                x, context, t_mod, freqs,
-                                use_reentrant=False,
-                            )
-                    else:
-                        x = torch.utils.checkpoint.checkpoint(
-                            create_custom_forward(block),
-                            x, context, t_mod, freqs,
-                            use_reentrant=False,
-                        )
-                else:
-                    x = block(x, context, t_mod, freqs)
+                x = block(**block_kwargs)
+            
+            if i_block < len(controlnet_states):
+                x += controlnet_states[i_block]
+
+
         # for i_block, block in enumerate(self.blocks):
         #     if self.training or self.gradient_checkpointing and use_gradient_checkpointing:
         #         if use_gradient_checkpointing_offload:

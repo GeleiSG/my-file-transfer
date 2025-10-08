@@ -41,16 +41,14 @@ from diffusers.utils import export_to_video
 from torch.utils.data.distributed import DistributedSampler
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.profilers import SimpleProfiler
-
+import torch.nn.functional as F
 # import time
 
 # from vggt.test import generate_camera_params
 # from vggt.vggt.models.vggt import VGGT
 
-import torch
 import traceback
 import sys
-import os
 
 class LightningModelForDataProcess(pl.LightningModule):
     def __init__(self, text_encoder_path, vae_path, image_encoder_path=None, tiled=False, tile_size=(34, 34), tile_stride=(18, 16)):
@@ -155,7 +153,9 @@ class FixedValDataset(torch.utils.data.Dataset):
 class LightningModelForTrain(pl.LightningModule):
     def __init__(
         self, dit_path,
-        text_encoder_path, vae_path, image_encoder_path=None, resume_ckpt_path=None, tiled=False, tile_size=(34, 34), tile_stride=(18, 16),
+        text_encoder_path, vae_path, image_encoder_path=None,
+        id_encoder_path=None, # ===== 新增参数 =====
+        resume_ckpt_path=None, tiled=False, tile_size=(34, 34), tile_stride=(18, 16),
         learning_rate=1e-5,
         lora_rank=4, lora_alpha=4, train_architecture="lora", lora_target_modules="q,k,v,o,ffn.0,ffn.2", init_lora_weights="kaiming",
         use_gradient_checkpointing=True, use_gradient_checkpointing_offload=False,
@@ -166,6 +166,8 @@ class LightningModelForTrain(pl.LightningModule):
         model_path = [text_encoder_path, vae_path]
         if image_encoder_path is not None:
             model_path.append(image_encoder_path)
+        if id_encoder_path is not None: # ===== 新增代码 =====
+            model_path.append(id_encoder_path)
         model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
         # model_manager.load_models(model_path) # load text encoder, vae, image encoder
 
@@ -188,6 +190,14 @@ class LightningModelForTrain(pl.LightningModule):
         #         block.projector = nn.Linear(dim, dim)
         #         block.projector.weight.data.zero_()
         #         block.projector.bias.data.zero_()
+
+        # ===== 新增代码：为ID图像定义变换 =====
+        self.id_transform = transforms.Compose([
+            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC, antialias=True),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        ])
+        # ==================================
+
         cfg = OmegaConf.load("/mnt/data/ssd/user_workspace/duanke/unicontrol/diffsynth/configs/config_yqf.json")
         self.pipe.dit.controlnet_cfg = cfg.controlnet_cfg
         self.pipe.dit.build_controlnet()
@@ -299,6 +309,11 @@ class LightningModelForTrain(pl.LightningModule):
                 init_lora_weights=init_lora_weights,
                 pretrained_lora_path=pretrained_lora_path,
             )
+            # ===== 新增代码：确保ID Encoder可训练 =====
+            if self.pipe.id_encoder is not None:
+                self.pipe.id_encoder.requires_grad_(True)
+                print("ID Encoder parameters are set to trainable.")
+            # ======================================
             for name, module in self.pipe.denoising_model().named_modules():
                 if any(keyword in name for keyword in ["cam_encoder", "projector", "cam_adapter"]):
                     print(f"Trainable: {name}")
@@ -318,6 +333,11 @@ class LightningModelForTrain(pl.LightningModule):
             
         else:
             self.pipe.denoising_model().requires_grad_(True)
+            # ===== 新增代码：确保ID Encoder可训练 =====
+            if self.pipe.id_encoder is not None:
+                self.pipe.id_encoder.requires_grad_(True)
+                print("ID Encoder parameters are set to trainable.")
+            # ======================================
 
         self.learning_rate = learning_rate
         self.use_gradient_checkpointing = use_gradient_checkpointing
@@ -377,6 +397,10 @@ class LightningModelForTrain(pl.LightningModule):
             self.pipe.dit.controlnet_mask_embedding,
             self.pipe.dit.controlnet_rope
         ]
+        # ===== 新增代码：将ID Encoder加入可训练模块 =====
+        if self.pipe.id_encoder is not None:
+            trainable_modules.append(self.pipe.id_encoder)
+        # ============================================
         
         # 步骤 4: 遍历列表，解冻这些模块的参数并设置为训练模式
         print("正在解冻并激活以下模块:")
@@ -769,6 +793,29 @@ class LightningModelForTrain(pl.LightningModule):
             else:
                 image_emb = {}
 
+            # ===== 修改开始: 处理多张ID图 =====
+            id_embedding = None
+            if "id_image" in batch and self.pipe.id_encoder is not None:
+                # batch["id_image"] 的形状现在是 (B, max_k, C, H, W)
+                id_images_batch = batch["id_image"].to(self.device, dtype=self.pipe.torch_dtype)
+                B, max_k, C, H, W = id_images_batch.shape
+
+                # 1. 预处理图像
+                id_images_batch = self.id_transform(id_images_batch.view(B * max_k, C, H, W))
+                
+                # 2. 通过 ID Encoder 编码
+                # 输入形状: (B * max_k, C, 224, 224)
+                # 输出形状: (B * max_k, num_patches, embed_dim)
+                id_embedding_flat = self.pipe.id_encoder(id_images_batch)
+                
+                # 3. 恢复批次结构并拼接特征
+                _, num_patches, embed_dim = id_embedding_flat.shape
+                # 恢复形状: (B, max_k, num_patches, embed_dim)
+                id_embedding = id_embedding_flat.view(B, max_k, num_patches, embed_dim)
+                # 拼接序列: (B, max_k * num_patches, embed_dim)
+                id_embedding = id_embedding.view(B, max_k * num_patches, embed_dim)
+            # ===== 修改结束 =====
+
             # render video
             render_video = render_video.to(dtype=self.pipe.torch_dtype, device=self.pipe.device)
             render_latent = self.pipe.encode_video(render_video, **self.tiler_kwargs)
@@ -836,8 +883,16 @@ class LightningModelForTrain(pl.LightningModule):
                 # camera_embedding = None
 
                 # Compute loss
+                # noise_pred = self.pipe.denoising_model()(
+                #     noisy_latents, timestep=timestep, camera_embedding=camera_embedding, render_latent=render_latent, render_mask=render_mask, **prompt_emb, **extra_input, **image_emb,
+                #     use_gradient_checkpointing=self.use_gradient_checkpointing,
+                #     use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload
+                # )
                 noise_pred = self.pipe.denoising_model()(
-                    noisy_latents, timestep=timestep, camera_embedding=camera_embedding, render_latent=render_latent, render_mask=render_mask, **prompt_emb, **extra_input, **image_emb,
+                    noisy_latents[valid_indices], timestep=timestep, camera_embedding=embedding_batch[valid_indices], 
+                    render_latent=render_latent[valid_indices], render_mask=render_mask[valid_indices],
+                    id_embedding=id_embedding, # <-- 在这里传入
+                    **prompt_emb, **extra_input, **image_emb,
                     use_gradient_checkpointing=self.use_gradient_checkpointing,
                     use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload
                 )
@@ -858,8 +913,16 @@ class LightningModelForTrain(pl.LightningModule):
                 noisy_latents = self.pipe.scheduler.add_noise(latents, noise, timestep)
 
                 # Compute loss
+                # noise_pred = self.pipe.denoising_model()(
+                #     noisy_latents, timestep=timestep, camera_embedding=camera_embedding, render_latent=render_latent, render_mask=render_mask, **prompt_emb, **extra_input, **image_emb,
+                #     use_gradient_checkpointing=self.use_gradient_checkpointing,
+                #     use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload
+                # )
                 noise_pred = self.pipe.denoising_model()(
-                    noisy_latents, timestep=timestep, camera_embedding=camera_embedding, render_latent=render_latent, render_mask=render_mask, **prompt_emb, **extra_input, **image_emb,
+                    noisy_latents[zero_indices], timestep=timestep, camera_embedding=None, 
+                    render_latent=None, render_mask=None,
+                    id_embedding=id_embedding[zero_indices] if id_embedding is not None else None, # 传递ID embedding
+                    **prompt_emb, **extra_input, **image_emb,
                     use_gradient_checkpointing=self.use_gradient_checkpointing,
                     use_gradient_checkpointing_offload=self.use_gradient_checkpointing_offload
                 )
@@ -956,7 +1019,12 @@ class LightningModelForTrain(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        trainable_modules = filter(lambda p: p.requires_grad, self.pipe.denoising_model().parameters())
+        # trainable_modules = filter(lambda p: p.requires_grad, self.pipe.denoising_model().parameters())
+        # ===== 修改：将 id_encoder 的参数也加入优化器 =====
+        trainable_modules = list(filter(lambda p: p.requires_grad, self.pipe.denoising_model().parameters()))
+        if self.pipe.id_encoder is not None:
+            trainable_modules += list(filter(lambda p: p.requires_grad, self.pipe.id_encoder.parameters()))
+        # ==================================================
         optimizer = torch.optim.AdamW(trainable_modules, lr=self.learning_rate)
         # --- 加入以下验证代码 ---
         print("--- Optimizing Parameters ---")
@@ -1025,6 +1093,41 @@ class LightningModelForTrain(pl.LightningModule):
     #     state_dict = self.pipe.denoising_model().state_dict()
     #     torch.save(state_dict, os.path.join(checkpoint_dir, f"step{current_step}.ckpt"))
 
+# ===== 新增自定义 collate_fn 函数 =====
+def custom_collate_fn(batch):
+    # 过滤掉 None 样本
+    batch = [item for item in batch if item is not None]
+    if not batch:
+        return None
+
+    # 1. 找出批次中单个样本包含的最大ID图像数量
+    max_k = 0
+    if "id_image" in batch[0]:
+        max_k = max(len(item["id_image"]) for item in batch)
+
+    # 2. 遍历每个样本进行填充
+    for item in batch:
+        if "id_image" in item:
+            id_images = item["id_image"] # 这是一个Tensor列表
+            current_k = len(id_images)
+            
+            # 如果当前样本的ID图数量小于最大值，则进行填充
+            if current_k < max_k:
+                # 获取一张图的形状 (C, H, W)
+                C, H, W = id_images[0].shape
+                # 创建一个全零的Tensor用于填充
+                padding_tensor = torch.zeros((C, H, W), dtype=id_images[0].dtype)
+                # 将填充Tensor添加到列表末尾
+                id_images.extend([padding_tensor] * (max_k - current_k))
+            
+            # 将列表中的所有Tensor堆叠成一个新的维度
+            # 最终形状为 (max_k, C, H, W)
+            item["id_image"] = torch.stack(id_images)
+        
+    # 3. 使用PyTorch默认的collate函数处理已经规整过的batch
+    # 它现在可以正确地将所有 (max_k, C, H, W) 的张量堆叠成 (B, max_k, C, H, W)
+    return default_collate(batch)
+# ===== 自定义 collate_fn 结束 =====
 
 
 def parse_args():
@@ -1274,6 +1377,9 @@ def parse_args():
         type=bool,
         default=True
     )
+    # ===== 新增参数 =====
+    parser.add_argument("--id_encoder_path", type=str, default=None, help="Path of ID Encoder.")
+    # ==================
     args = parser.parse_args()
     return args
 
@@ -1676,7 +1782,9 @@ class CameraDataModule(pl.LightningDataModule):
             dataloader = torch.utils.data.DataLoader(
                 self.dataset,
                 batch_sampler=batch_sampler,
-                collate_fn=collate_fn,
+                # ===== 修改：使用我们自定义的 collate_fn =====
+                collate_fn=custom_collate_fn,
+                # ==========================================
                 num_workers=self.args.dataloader_num_workers,
             )
         else:
@@ -1775,6 +1883,7 @@ def train(args):
         dit_path=args.dit_path,
         text_encoder_path=args.text_encoder_path,
         image_encoder_path=args.image_encoder_path,
+        id_encoder_path=args.id_encoder_path, # 传递路径
         resume_ckpt_path=args.camera_encoder_path,
         vae_path=args.vae_path,
         learning_rate=args.learning_rate,

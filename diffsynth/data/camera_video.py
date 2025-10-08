@@ -348,14 +348,23 @@ class CameraVideoDataset(torch.utils.data.Dataset):
                 return None
 
             video_id = list(indices)
+
+            # ===== 修改开始 =====
+            # 随机选择 1 到 5 帧作为 ID 图像列表
+            num_id_images = random.randint(1, 5)
+            id_indices = [random.randint(0, video.shape[0] - 1) for _ in range(num_id_images)]
+            # 将这些帧收集到一个列表中
+            id_images_list = [video[i].clone() for i in id_indices]
+            # ===== 修改结束 =====
             
             # 3. 构建包含所有原始数据的基础字典 (保留)
             data = {
                 "text": self.text[data_id], 
-                "video": video,  # <-- 这是原始尺寸的视频
+                "video": video,
                 "path": item_meta['path'], 
                 "video_id": video_id, 
-                "type": "video"
+                "type": "video",
+                "id_image": id_images_list # 【重要】现在返回的是一个Tensor列表
             }
             
             if self.is_i2v:
