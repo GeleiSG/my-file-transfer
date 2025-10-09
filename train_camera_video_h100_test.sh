@@ -1,0 +1,22 @@
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" python wanvideo/train_wan_camera_t2v_plucker.py \
+  --task train \
+  --train_architecture lora \
+  --training_strategy fsdp \
+  --dataset_path /mnt/data/camera_datasets/MuteApo/RealCam-Vid \
+  --output_path ./models_1.3b_full_pretrain_mixkit_realcam_120k_realcam100k_lora_finetune \
+  --dit_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/diffusion_pytorch_model.safetensors" \
+  --image_encoder_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth" \
+  --text_encoder_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_t5_umt5-xxl-enc-bf16.pth" \
+  --vae_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/Wan2.1_VAE.pth" \
+  --camera_encoder_path "models_1.3b_full_pretrain_mixkit/tensorboardlog/version_1/checkpoints/step3500.ckpt" \
+  --steps_per_epoch 0 \
+  --per_device_batch_size 4 \
+  --dataloader_num_workers 8 \
+  --max_epochs 4 \
+  --learning_rate 2e-5 \
+  --lora_rank 16 \
+  --lora_alpha 16 \
+  --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
+  --accumulate_grad_batches 1 \
+  --use_gradient_checkpointing \
+  --use_tensorboard \

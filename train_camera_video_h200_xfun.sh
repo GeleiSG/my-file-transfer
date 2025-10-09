@@ -1,0 +1,20 @@
+CUDA_VISIBLE_DEVICES="0,1,2,3" python wanvideo/train_wan_camera_t2v_plucker_xfun.py \
+  --task train \
+  --train_architecture adapter \
+  --dataset_path /mnt/data/camera_datasets/KwaiVGI/MultiCamVideo-Dataset \
+  --output_path ./models_1.3b_adapter_plucker_xfun \
+  --dit_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/diffusion_pytorch_model.safetensors" \
+  --image_encoder_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth" \
+  --text_encoder_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_t5_umt5-xxl-enc-bf16.pth" \
+  --vae_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/Wan2.1_VAE.pth" \
+  --steps_per_epoch 0 \
+  --per_device_batch_size 8 \
+  --dataloader_num_workers 8 \
+  --max_epochs 100 \
+  --learning_rate 1e-5 \
+  --lora_rank 16 \
+  --lora_alpha 16 \
+  --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
+  --accumulate_grad_batches 1 \
+  --use_gradient_checkpointing \
+  --use_tensorboard \

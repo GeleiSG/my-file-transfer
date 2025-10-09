@@ -1,0 +1,22 @@
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6" python wanvideo/train_wan_camera_t2v_plucker.py \
+  --task train \
+  --train_architecture controlnet \
+  --dataset_path /mnt/data/camera_datasets/MuteApo/RealCam-Vid \
+  --output_path /mnt/workspace/checkpoint/wan21_1-3b_uni3c_baseline_nomira_1e-5_bz56_5epochs \
+  --dit_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/diffusion_pytorch_model.safetensors" \
+  --image_encoder_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth" \
+  --text_encoder_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_t5_umt5-xxl-enc-bf16.pth" \
+  --vae_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/Wan2.1_VAE.pth" \
+  --steps_per_epoch 0 \
+  --per_device_batch_size 8 \
+  --dataloader_num_workers 8 \
+  --width 416 \
+  --height 240 \
+  --max_epochs 3 \
+  --learning_rate 1e-5 \
+  --lora_rank 16 \
+  --lora_alpha 16 \
+  --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
+  --accumulate_grad_batches 1 \
+  --use_gradient_checkpointing \
+  --use_tensorboard \

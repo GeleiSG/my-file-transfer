@@ -1,0 +1,18 @@
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" python wanvideo/train_wan_camera_t2v_plucker_tensor.py \
+  --task train \
+  --train_architecture adapter \
+  --training_strategy deepspeed_stage_2 \
+  --dataset_path /mnt/data/camera_datasets/KwaiVGI/MultiCamVideo-Dataset \
+  --output_path ./models_1.3b_full_adapter_multicam_tensor \
+  --dit_path "/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/diffusion_pytorch_model.safetensors" \
+  --steps_per_epoch 0 \
+  --per_device_batch_size 8 \
+  --dataloader_num_workers 8 \
+  --max_epochs 1 \
+  --learning_rate 1e-4 \
+  --lora_rank 16 \
+  --lora_alpha 16 \
+  --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
+  --accumulate_grad_batches 1 \
+  --use_gradient_checkpointing \
+  --use_tensorboard \
