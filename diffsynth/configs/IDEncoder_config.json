@@ -1,0 +1,11 @@
+{
+    "model_class": "diffsynth.models.id_encoder.id_encoder_from_config",
+    "model_path": "./id_encoder_weights.pth",
+    "config": {
+        "img_size": 224,
+        "patch_size": 16,
+        "embed_dim": 1536,
+        "depth": 6,
+        "num_heads": 12
+    }
+}
