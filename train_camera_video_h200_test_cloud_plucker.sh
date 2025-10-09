@@ -17,7 +17,8 @@ GPUS="1,2,3,4,5,6"
 
 # -- 核心路径 --
 DATASET_PATH="/mnt/data/camera_datasets_ssd/MuteApo/RealCam-Vid"
-DATASET_LIST="/mnt/data/camera_datasets_ssd/MuteApo/RealCam-Vid/RealCam-Vid_train_camera.npz"
+# DATASET_LIST="/mnt/data/camera_datasets_ssd/MuteApo/RealCam-Vid/RealCam-Vid_train_camera.npz"
+DATASET_LIST="/mnt/data/hdd/user_workspace/wangbohao/processed_metadata_with_ids.pkl"
 OUTPUT_PATH="/mnt/workspace/checkpoint/wan21_1-3b_plucker_pointcloud_epoch_2"
 DIT_PATH="/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/diffusion_pytorch_model.safetensors"
 IMAGE_ENCODER_PATH="/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
@@ -27,7 +28,7 @@ VAE_PATH="/mnt/data/video_public_ckpt/Wan-AI/Wan2.1-Fun-1.3B-InP/Wan2.1_VAE.pth"
 # ===== 新增路径 =====
 # 请将此路径指向您为 ID Encoder 创建的配置文件
 # 这个配置文件包含了模型权重路径和结构参数
-ID_ENCODER_CONFIG_PATH="diffsynth/configs/IDEncoder_config.json"
+ID_ENCODER_CONFIG_PATH="/mnt/data/hdd/user_workspace/wangbohao/my-file-transfer/diffsynth/configs/IDEncoder_config.json"
 # ===================
 
 # -- 训练超参数 --

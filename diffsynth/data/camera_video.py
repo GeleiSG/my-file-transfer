@@ -68,55 +68,72 @@ class CameraVideoDataset(torch.utils.data.Dataset):
             is_camera=False
         ):
         t0 = time.time()
-        processed_metadata_path="/mnt/workspace/processed_metadata_withoutMiraData9K.pkl"
-        print(f"正在从 {processed_metadata_path} 加载预处理好的元数据...")
+
+        # --- 核心修改：直接加载 .pkl 文件 ---
+        print(f"正在从整合后的 metadata 文件加载: {annotation_path}")
         try:
-            # 1. 检查缓存文件是否存在
-            if os.path.exists(processed_metadata_path):
-                print(f"发现缓存文件: {processed_metadata_path}，正在尝试加载...")
-                with open(processed_metadata_path, 'rb') as f:
-                    # 2. 如果文件存在，尝试加载
-                    #    这里可以捕获特定的加载错误，比如文件损坏
-                    try:
-                        self.metadata = pickle.load(f)
-                        print(f"元数据加载成功！共计{len(self.metadata)}")
-                    except (pickle.UnpicklingError, EOFError) as e:
-                        print(f"警告：缓存文件 '{processed_metadata_path}' 已损坏或为空 ({e})。将重新进行预处理...")
-                        # 将 metadata 设为 None，触发下面的预处理逻辑
-                        self.metadata = None
-            else:
-                # 如果文件不存在，也标记为 None，触发预处理
-                print(f"未找到缓存文件: {processed_metadata_path}")
-                self.metadata = None
-
-            # 3. 如果 metadata 未能成功加载，则执行预处理
-            if self.metadata is None:
-                print("开始重新预处理元数据，这可能需要一些时间...")
-                print(f"源标注文件: {annotation_paths[0]}")
-                print(f"数据根目录: {base_path}")
-                print(f"将保存至: {processed_metadata_path}") # <--- 直接使用原始期望的路径
-
-                # 直接调用预处理函数，并将结果保存在我们期望的路径
-                preprocess_metadata(
-                    annotation_paths, 
-                    base_path, 
-                    processed_metadata_path, # <--- 将新文件保存到原始路径
-                    num_frames=num_frames
-                )
-                
-                # 4. 从新创建的文件中加载数据
-                print("预处理完成，正在加载新生成的元数据...")
-                with open(processed_metadata_path, 'rb') as f:
-                    self.metadata = pickle.load(f)
-                print("新元数据加载成功！")
-
+            with open(annotation_path, 'rb') as f:
+                self.metadata = pickle.load(f)
+            print(f"元数据加载成功！共计 {len(self.metadata)} 条数据。")
+        except FileNotFoundError:
+            print(f"错误：找不到整合后的metadata文件 at {annotation_path}")
+            print("请先运行 merge_id_metadata.py 脚本来生成此文件。")
+            raise
         except Exception as e:
-            # 捕获其他所有意外错误，例如权限问题等
-            print(f"在数据加载/预处理过程中发生严重错误: {e}")
-            # 在这里可以决定是抛出异常让程序停止，还是进行其他处理
-            raise e
+            print(f"加载 {annotation_path} 时发生错误: {e}")
+            raise
+        # --- 修改结束 ---
+
+        # processed_metadata_path="/mnt/workspace/processed_metadata_withoutMiraData9K.pkl"
+        # print(f"正在从 {processed_metadata_path} 加载预处理好的元数据...")
+        # try:
+        #     # 1. 检查缓存文件是否存在
+        #     if os.path.exists(processed_metadata_path):
+        #         print(f"发现缓存文件: {processed_metadata_path}，正在尝试加载...")
+        #         with open(processed_metadata_path, 'rb') as f:
+        #             # 2. 如果文件存在，尝试加载
+        #             #    这里可以捕获特定的加载错误，比如文件损坏
+        #             try:
+        #                 self.metadata = pickle.load(f)
+        #                 print(f"元数据加载成功！共计{len(self.metadata)}")
+        #             except (pickle.UnpicklingError, EOFError) as e:
+        #                 print(f"警告：缓存文件 '{processed_metadata_path}' 已损坏或为空 ({e})。将重新进行预处理...")
+        #                 # 将 metadata 设为 None，触发下面的预处理逻辑
+        #                 self.metadata = None
+        #     else:
+        #         # 如果文件不存在，也标记为 None，触发预处理
+        #         print(f"未找到缓存文件: {processed_metadata_path}")
+        #         self.metadata = None
+
+        #     # 3. 如果 metadata 未能成功加载，则执行预处理
+        #     if self.metadata is None:
+        #         print("开始重新预处理元数据，这可能需要一些时间...")
+        #         print(f"源标注文件: {annotation_paths[0]}")
+        #         print(f"数据根目录: {base_path}")
+        #         print(f"将保存至: {processed_metadata_path}") # <--- 直接使用原始期望的路径
+
+        #         # 直接调用预处理函数，并将结果保存在我们期望的路径
+        #         preprocess_metadata(
+        #             annotation_paths, 
+        #             base_path, 
+        #             processed_metadata_path, # <--- 将新文件保存到原始路径
+        #             num_frames=num_frames
+        #         )
+                
+        #         # 4. 从新创建的文件中加载数据
+        #         print("预处理完成，正在加载新生成的元数据...")
+        #         with open(processed_metadata_path, 'rb') as f:
+        #             self.metadata = pickle.load(f)
+        #         print("新元数据加载成功！")
+
+        # except Exception as e:
+        #     # 捕获其他所有意外错误，例如权限问题等
+        #     print(f"在数据加载/预处理过程中发生严重错误: {e}")
+        #     # 在这里可以决定是抛出异常让程序停止，还是进行其他处理
+        #     raise e
         self.metadata = self.metadata[:10000]
-        self.text = [entry["text"] if random.random() < 0.9 else "" for entry in self.metadata]
+        # self.text = [entry["text"] if random.random() < 0.9 else "" for entry in self.metadata]
+        self.text = [entry.get("short_caption", entry.get("long_caption", "")) if random.random() < 0.9 else "" for entry in self.metadata]
         ASPECT_RATIO = get_aspect_ratio(size=632) # 假设 video_sample_size 是固定的
         self.aspect_ratio_sample_size = {key: [int(x / 16) * 16 for x in ASPECT_RATIO[key]] for key in ASPECT_RATIO.keys()}
 
@@ -349,12 +366,24 @@ class CameraVideoDataset(torch.utils.data.Dataset):
 
             video_id = list(indices)
 
-            # ===== 修改开始 =====
-            # 随机选择 1 到 5 帧作为 ID 图像列表
-            num_id_images = random.randint(1, 5)
-            id_indices = [random.randint(0, video.shape[0] - 1) for _ in range(num_id_images)]
-            # 将这些帧收集到一个列表中
-            id_images_list = [video[i].clone() for i in id_indices]
+            # ===== 核心修改：从路径加载ID图像 =====
+            id_images_list = []
+            if 'id_crop_paths' in item_meta and item_meta['id_crop_paths']:
+                for crop_path in item_meta['id_crop_paths']:
+                    try:
+                        # 使用 Pillow 加载图片并转换为RGB
+                        img = Image.open(crop_path).convert("RGB")
+                        # 转换为 Tensor，范围在 [0, 1]
+                        id_images_list.append(v2.functional.to_tensor(img))
+                    except Exception as img_e:
+                        print(f"警告：加载ID图像失败: {crop_path} - {img_e}")
+            
+            # 如果没有加载到任何ID图，可以返回一个空列表或一个占位符
+            if not id_images_list:
+                # 创建一个与视频帧尺寸相同的黑色图像作为占位符
+                _, C, H, W = video.shape
+                placeholder_img = torch.zeros((C, H, W))
+                id_images_list.append(placeholder_img)
             # ===== 修改结束 =====
             
             # 3. 构建包含所有原始数据的基础字典 (保留)
