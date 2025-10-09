@@ -62,10 +62,22 @@ from ..models.wan_video_vae import WanVideoVAE
 from ..models.wan_video_motion_controller import WanMotionControllerModel
 from ..models.wan_video_vace import VaceWanModel
 
+from ..models.id_encoder import IDEncoder
 
 model_loader_configs = [
     # These configs are provided for detecting model type automatically.
     # The format is (state_dict_keys_hash, state_dict_keys_hash_with_shape, model_names, model_classes, model_resource)
+    (
+        # 这是一个示例哈希值，您需要先运行一次代码，
+        # 如果模型加载失败，它会打印出正确的哈希值，
+        # 然后您再回来填入正确的哈希值。
+        # 或者您可以暂时将其设置为一个不存在的值。
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", # with_shape hash
+        ["id_encoder"], # model_name
+        [IDEncoder],    # model_class
+        "civitai"       # model_resource
+    ),
     (None, "091b0e30e77c76626b3ba62acdf95343", ["sd_controlnet"], [SDControlNet], "civitai"),
     (None, "4a6c8306a27d916dea81263c8c88f450", ["hunyuan_dit_clip_text_encoder"], [HunyuanDiTCLIPTextEncoder], "civitai"),
     (None, "f4aec400fe394297961218c768004521", ["hunyuan_dit"], [HunyuanDiT], "civitai"),
